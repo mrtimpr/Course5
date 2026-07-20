@@ -1,16 +1,17 @@
-[project]
-name = "course5"
-version = "0.1.0"
-description = ""
-authors = [
-    {name = "Timofey",email = "mr.tim.iv@gmail.com"}
-]
-readme = "README.md"
-requires-python = ">=3.14"
-dependencies = [
-]
+[tool.ruff]
+line-length = 88
+target-version = "py312"
+exclude = [".venv", "*/migrations/*"]
 
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]
 
-[build-system]
-requires = ["poetry-core>=2.0.0,<3.0.0"]
-build-backend = "poetry.core.masonry.api"
+[tool.coverage.run]
+branch = true
+source = ["users", "habits", "telegram_bot"]
+omit = ["*/migrations/*", "*/admin.py", "*/apps.py"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false
+fail_under = 80

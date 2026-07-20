@@ -1,3 +1,5 @@
+"""Django settings for the Habit Tracker API."""
+
 from datetime import timedelta
 from pathlib import Path
 
@@ -8,20 +10,27 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 env = environ.Env(
     DEBUG=(bool, False),
     CORS_ALLOW_CREDENTIALS=(bool, True),
+    SECURE_SSL_REDIRECT=(bool, False),
+    SESSION_COOKIE_SECURE=(bool, False),
+    CSRF_COOKIE_SECURE=(bool, False),
+    SECURE_HSTS_SECONDS=(int, 0),
     TELEGRAM_REQUEST_TIMEOUT=(int, 10),
     JWT_ACCESS_MINUTES=(int, 60),
     JWT_REFRESH_DAYS=(int, 7),
+    DATABASE_CONN_MAX_AGE=(int, 60),
 )
 environ.Env.read_env(BASE_DIR / ".env")
 
 SECRET_KEY = env.str(
     "SECRET_KEY",
-    default="unsafe-development-key-change-it-through-an-environment-variable",
+    default="unsafe-development-key-change-it-in-environment",
 )
 DEBUG = env.bool("DEBUG")
 ALLOWED_HOSTS = env.list(
-    "ALLOWED_HOSTS", default=["localhost", "127.0.0.1", "testserver"]
+    "ALLOWED_HOSTS",
+    default=["localhost", "127.0.0.1", "testserver"],
 )
+CSRF_TRUSTED_ORIGINS = env.list("CSRF_TRUSTED_ORIGINS", default=[])
 
 INSTALLED_APPS = [
     "django.contrib.admin",
@@ -76,6 +85,7 @@ DATABASES = {
         default=f"sqlite:///{BASE_DIR / 'db.sqlite3'}",
     )
 }
+DATABASES["default"]["CONN_MAX_AGE"] = env.int("DATABASE_CONN_MAX_AGE")
 
 AUTH_PASSWORD_VALIDATORS = [
     {
@@ -93,12 +103,36 @@ TIME_ZONE = env.str("TIME_ZONE", default="Europe/Helsinki")
 USE_I18N = True
 USE_TZ = True
 
-STATIC_URL = "static/"
+STATIC_URL = "/static/"
+STATIC_ROOT = BASE_DIR / "staticfiles"
+MEDIA_URL = "/media/"
+MEDIA_ROOT = BASE_DIR / "media"
+
+STORAGES = {
+    "default": {
+        "BACKEND": "django.core.files.storage.FileSystemStorage",
+    },
+    "staticfiles": {
+        "BACKEND": ("django.contrib.staticfiles.storage.ManifestStaticFilesStorage"),
+    },
+}
+
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 AUTH_USER_MODEL = "users.User"
 
 CORS_ALLOWED_ORIGINS = env.list("CORS_ALLOWED_ORIGINS", default=[])
 CORS_ALLOW_CREDENTIALS = env.bool("CORS_ALLOW_CREDENTIALS")
+
+SECURE_SSL_REDIRECT = env.bool("SECURE_SSL_REDIRECT")
+SESSION_COOKIE_SECURE = env.bool("SESSION_COOKIE_SECURE")
+CSRF_COOKIE_SECURE = env.bool("CSRF_COOKIE_SECURE")
+SECURE_HSTS_SECONDS = env.int("SECURE_HSTS_SECONDS")
+SECURE_HSTS_INCLUDE_SUBDOMAINS = SECURE_HSTS_SECONDS > 0
+SECURE_HSTS_PRELOAD = SECURE_HSTS_SECONDS > 0
+SECURE_CONTENT_TYPE_NOSNIFF = True
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+USE_X_FORWARDED_HOST = True
+X_FRAME_OPTIONS = "DENY"
 
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": (
@@ -118,38 +152,20 @@ SIMPLE_JWT = {
 SPECTACULAR_SETTINGS = {
     "TITLE": "Habit Tracker API",
     "DESCRIPTION": (
-        "API для управления полезными и приятными привычками, "
-        "включая напоминания в Telegram."
+        "API для управления полезными и приятными привычками с Telegram-напоминаниями."
     ),
     "VERSION": "1.0.0",
     "SERVE_INCLUDE_SCHEMA": False,
 }
 
-
-CELERY_BROKER_URL = env.str("CELERY_BROKER_URL", default="filesystem://")
+CELERY_BROKER_URL = env.str("CELERY_BROKER_URL", default="memory://")
 CELERY_RESULT_BACKEND = env.str(
     "CELERY_RESULT_BACKEND",
     default="cache+memory://",
 )
-CELERY_FILESYSTEM_BROKER_DIR = BASE_DIR / ".celery" / "broker"
-CELERY_FILESYSTEM_PROCESSED_DIR = BASE_DIR / ".celery" / "processed"
-CELERY_FILESYSTEM_CONTROL_DIR = BASE_DIR / ".celery" / "control"
-
-for celery_directory in (
-    CELERY_FILESYSTEM_BROKER_DIR,
-    CELERY_FILESYSTEM_PROCESSED_DIR,
-    CELERY_FILESYSTEM_CONTROL_DIR,
-):
-    celery_directory.mkdir(parents=True, exist_ok=True)
-
-CELERY_BROKER_TRANSPORT_OPTIONS = {
-    "data_folder_in": str(CELERY_FILESYSTEM_BROKER_DIR),
-    "data_folder_out": str(CELERY_FILESYSTEM_BROKER_DIR),
-    "processed_folder": str(CELERY_FILESYSTEM_PROCESSED_DIR),
-    "control_folder": str(CELERY_FILESYSTEM_CONTROL_DIR),
-    "store_processed": False,
-}
 CELERY_TASK_IGNORE_RESULT = True
+CELERY_TASK_TRACK_STARTED = True
+CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
 CELERY_TIMEZONE = TIME_ZONE
 CELERY_ENABLE_UTC = True
 CELERY_BEAT_SCHEDULE = {
@@ -160,5 +176,32 @@ CELERY_BEAT_SCHEDULE = {
 }
 
 TELEGRAM_BOT_TOKEN = env.str("TELEGRAM_BOT_TOKEN", default="")
-TELEGRAM_API_URL = env.str("TELEGRAM_API_URL", default="https://api.telegram.org")
+TELEGRAM_API_URL = env.str(
+    "TELEGRAM_API_URL",
+    default="https://api.telegram.org",
+)
 TELEGRAM_REQUEST_TIMEOUT = env.int("TELEGRAM_REQUEST_TIMEOUT")
+
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "verbose": {
+            "format": (
+                "{asctime} {levelname} {name} "
+                "process={process:d} thread={thread:d} {message}"
+            ),
+            "style": "{",
+        }
+    },
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+            "formatter": "verbose",
+        }
+    },
+    "root": {
+        "handlers": ["console"],
+        "level": env.str("LOG_LEVEL", default="INFO"),
+    },
+}
