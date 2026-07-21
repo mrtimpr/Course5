@@ -1,10 +1,25 @@
 [tool.ruff]
 line-length = 88
 target-version = "py312"
-exclude = [".venv", "*/migrations/*"]
+exclude = [
+    ".git",
+    ".github",
+    ".venv",
+    "staticfiles",
+    "media",
+    "*/migrations/*",
+]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "W"]
+ignore = [
+    "E501",  # Line length is enforced by the Ruff formatter where safe.
+]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "auto"
 
 [tool.coverage.run]
 branch = true
