@@ -1,0 +1,252 @@
+name: Habit Tracker CI/CD
+
+on:
+  pull_request:
+    branches:
+      - develop
+  push:
+    branches:
+      - develop
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: habit-tracker-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: "3.12"
+
+jobs:
+  quality:
+    name: Tests and lint
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: habit_tracker_ci
+          POSTGRES_USER: habit_ci
+          POSTGRES_PASSWORD: habit_ci_password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U habit_ci -d habit_tracker_ci"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=12
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd="redis-cli ping"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=12
+
+    env:
+      SECRET_KEY: ci-only-secret-key-not-used-in-production
+      DEBUG: "False"
+      ALLOWED_HOSTS: localhost,127.0.0.1,testserver
+      CSRF_TRUSTED_ORIGINS: http://localhost,http://127.0.0.1
+      DATABASE_URL: postgresql://habit_ci:habit_ci_password@127.0.0.1:5432/habit_tracker_ci
+      CELERY_BROKER_URL: redis://127.0.0.1:6379/0
+      CELERY_RESULT_BACKEND: redis://127.0.0.1:6379/0
+      TELEGRAM_BOT_TOKEN: test-token
+      CORS_ALLOWED_ORIGINS: http://localhost:3000
+      CORS_ALLOW_CREDENTIALS: "True"
+      RUFF_CACHE_DIR: /tmp/ruff_cache
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Run Ruff checks
+        run: |
+          ruff check --no-cache config users habits telegram_bot tests manage.py
+          ruff format --check --no-cache config users habits telegram_bot tests manage.py
+
+      - name: Check committed migrations
+        run: python manage.py makemigrations --check --dry-run
+
+      - name: Apply migrations
+        run: python manage.py migrate --noinput
+
+      - name: Run Django system checks
+        run: python manage.py check
+
+      - name: Validate OpenAPI schema
+        run: python manage.py spectacular --file schema-ci.yml --validate
+
+      - name: Run tests with coverage
+        run: >-
+          pytest
+          --cov=users
+          --cov=habits
+          --cov=telegram_bot
+          --cov-report=term-missing
+          --cov-fail-under=80
+
+  docker:
+    name: Build and smoke-test Docker Compose
+    runs-on: ubuntu-latest
+    needs: quality
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Prepare CI environment
+        run: |
+          cp .env.template .env
+          sed -i 's/^HTTP_PORT=.*/HTTP_PORT=8080/' .env
+          sed -i 's/^SECRET_KEY=.*/SECRET_KEY=ci-docker-secret-key/' .env
+          sed -i 's/^POSTGRES_PASSWORD=.*/POSTGRES_PASSWORD=ci-docker-password/' .env
+          sed -i 's#^DATABASE_URL=.*#DATABASE_URL=postgresql://habit_user:ci-docker-password@db:5432/habit_tracker#' .env
+          sed -i 's/^TELEGRAM_BOT_TOKEN=.*/TELEGRAM_BOT_TOKEN=test-token/' .env
+
+      - name: Validate Docker Compose configuration
+        run: docker compose config --quiet
+
+      - name: Build Docker images
+        run: docker compose build --pull
+
+      - name: Start all services
+        run: docker compose up -d --remove-orphans
+
+      - name: Wait for application health check
+        run: |
+          for attempt in $(seq 1 36); do
+            if curl --fail --silent --show-error http://127.0.0.1:8080/health/; then
+              exit 0
+            fi
+            echo "Waiting for application: ${attempt}/36"
+            sleep 5
+          done
+          docker compose ps --all
+          docker compose logs --no-color --tail=300
+          exit 1
+
+      - name: Verify running services
+        run: |
+          docker compose ps --all
+          docker compose exec -T web python manage.py check
+          docker compose exec -T celery_worker celery -A config inspect ping --timeout=10
+
+      - name: Show logs on failure
+        if: failure()
+        run: docker compose logs --no-color --tail=300
+
+      - name: Stop CI services
+        if: always()
+        run: docker compose down -v --remove-orphans
+
+  deploy:
+    name: Deploy to production server
+    runs-on: ubuntu-latest
+    needs: docker
+    if: github.event_name == 'push' && github.ref == 'refs/heads/develop'
+    environment: production
+
+    concurrency:
+      group: habit-tracker-production
+      cancel-in-progress: false
+
+    env:
+      DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+      DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+      DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
+      DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+      DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+      DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+      PROD_ENV: ${{ secrets.PROD_ENV }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Validate deployment secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          : "${DEPLOY_HOST:?Add DEPLOY_HOST to GitHub Secrets}"
+          : "${DEPLOY_USER:?Add DEPLOY_USER to GitHub Secrets}"
+          : "${DEPLOY_PATH:?Add DEPLOY_PATH to GitHub Secrets}"
+          : "${DEPLOY_SSH_KEY:?Add DEPLOY_SSH_KEY to GitHub Secrets}"
+          : "${PROD_ENV:?Add PROD_ENV to GitHub Secrets}"
+
+          DEPLOY_PORT="${DEPLOY_PORT:-22}"
+          echo "DEPLOY_PORT=${DEPLOY_PORT}" >> "$GITHUB_ENV"
+
+      - name: Configure SSH
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+
+          if [ -n "${DEPLOY_KNOWN_HOSTS:-}" ]; then
+            printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          else
+            ssh-keyscan -p "$DEPLOY_PORT" -H "$DEPLOY_HOST" > ~/.ssh/known_hosts
+          fi
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Prepare deployment directory
+        run: |
+          ssh -i ~/.ssh/deploy_key -p "$DEPLOY_PORT" \
+            "$DEPLOY_USER@$DEPLOY_HOST" \
+            "mkdir -p '$DEPLOY_PATH'"
+
+      - name: Upload project
+        run: |
+          rsync -az --delete \
+            --exclude '.git/' \
+            --exclude '.github/' \
+            --exclude '.env' \
+            --exclude '.venv/' \
+            --exclude '__pycache__/' \
+            --exclude '.pytest_cache/' \
+            --exclude '.ruff_cache/' \
+            --exclude '.coverage' \
+            --exclude 'media/' \
+            --exclude 'staticfiles/' \
+            -e "ssh -i ~/.ssh/deploy_key -p $DEPLOY_PORT" \
+            ./ "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/"
+
+      - name: Upload production environment
+        shell: bash
+        run: |
+          printf '%s\n' "$PROD_ENV" | ssh \
+            -i ~/.ssh/deploy_key \
+            -p "$DEPLOY_PORT" \
+            "$DEPLOY_USER@$DEPLOY_HOST" \
+            "umask 077 && cat > '$DEPLOY_PATH/.env'"
+
+      - name: Run remote deployment
+        run: |
+          ssh -i ~/.ssh/deploy_key -p "$DEPLOY_PORT" \
+            "$DEPLOY_USER@$DEPLOY_HOST" \
+            "chmod +x '$DEPLOY_PATH/scripts/deploy.sh' && PROJECT_DIR='$DEPLOY_PATH' bash '$DEPLOY_PATH/scripts/deploy.sh'"

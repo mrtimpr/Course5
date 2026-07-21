@@ -541,3 +541,79 @@ docker compose logs nginx
 - каталог `DEPLOY_PATH` принадлежит SSH-пользователю;
 - на сервере установлены `docker compose`, `rsync` и `curl`;
 - порты SSH и HTTP открыты в firewall.
+
+## Обязательный GitHub Actions workflow
+
+Файл автоматизации должен быть закоммичен именно по пути:
+
+```text
+.github/workflows/ci-cd.yml
+```
+
+GitHub не обнаружит workflow, если файл находится в обычном каталоге проекта,
+в архиве вне `.github/workflows` или не добавлен в Git.
+
+Проверка перед push:
+
+```bash
+git status
+git add .github/workflows/ci-cd.yml scripts/deploy.sh README.md
+git commit -m "Add CI/CD workflow and automatic deployment"
+git push origin <ветка-домашнего-задания>
+```
+
+После создания Pull Request в `develop` должны выполниться два этапа:
+
+1. `Tests and lint`;
+2. `Build and smoke-test Docker Compose`.
+
+После merge в `develop` дополнительно запускается этап:
+
+3. `Deploy to production server`.
+
+### GitHub Secrets
+
+Откройте `Settings → Secrets and variables → Actions` и добавьте:
+
+| Secret | Пример | Назначение |
+|---|---|---|
+| `DEPLOY_HOST` | `203.0.113.10` | IP-адрес или домен сервера |
+| `DEPLOY_USER` | `deploy` | SSH-пользователь |
+| `DEPLOY_PORT` | `22` | SSH-порт; можно не создавать для порта 22 |
+| `DEPLOY_PATH` | `/opt/habit_tracker_backend` | Каталог приложения на сервере |
+| `DEPLOY_SSH_KEY` | содержимое приватного ключа | SSH-ключ без парольной фразы |
+| `DEPLOY_KNOWN_HOSTS` | результат `ssh-keyscan` | Рекомендуемая фиксация ключа сервера |
+| `PROD_ENV` | полное содержимое production `.env` | Переменные production-окружения |
+
+Получение `DEPLOY_KNOWN_HOSTS`:
+
+```bash
+ssh-keyscan -p 22 -H SERVER_IP
+```
+
+Пример содержимого `PROD_ENV`:
+
+```env
+SECRET_KEY=production-long-random-key
+DEBUG=False
+ALLOWED_HOSTS=example.com,SERVER_IP
+CSRF_TRUSTED_ORIGINS=https://example.com,http://SERVER_IP
+CORS_ALLOWED_ORIGINS=https://frontend.example.com
+CORS_ALLOW_CREDENTIALS=True
+
+POSTGRES_DB=habit_tracker
+POSTGRES_USER=habit_user
+POSTGRES_PASSWORD=strong-production-password
+DATABASE_URL=postgresql://habit_user:strong-production-password@db:5432/habit_tracker
+
+CELERY_BROKER_URL=redis://redis:6379/0
+CELERY_RESULT_BACKEND=redis://redis:6379/0
+TELEGRAM_BOT_TOKEN=token-from-BotFather
+
+HTTP_PORT=80
+IMAGE_TAG=latest
+```
+
+Пароль PostgreSQL внутри `DATABASE_URL` должен совпадать с
+`POSTGRES_PASSWORD`. Если пароль содержит специальные URL-символы, его нужно
+URL-кодировать или выбрать пароль без `@`, `:`, `/`, `#` и `%`.
