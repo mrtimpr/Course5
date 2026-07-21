@@ -20,8 +20,7 @@ RUN mkdir -p \
         /app/staticfiles \
         /app/media \
         /tmp/ruff_cache \
-    && chown -R app:app /app /tmp/ruff_cache \
-    && chmod +x /app/scripts/startup.sh
+    && chown -R app:app /app /tmp/ruff_cache
 
 USER app
 

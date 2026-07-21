@@ -46,7 +46,7 @@ services:
   migrate:
     <<: *app-base
     restart: "no"
-    command: /app/scripts/startup.sh
+    command: ["sh", "/app/scripts/startup.sh"]
     volumes:
       - static_data:/app/staticfiles
       - media_data:/app/media
