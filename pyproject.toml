@@ -1,16 +1,32 @@
-[project]
-name = "course5"
-version = "0.1.0"
-description = ""
-authors = [
-    {name = "Timofey",email = "mr.tim.iv@gmail.com"}
-]
-readme = "README.md"
-requires-python = ">=3.14"
-dependencies = [
+[tool.ruff]
+line-length = 88
+target-version = "py312"
+exclude = [
+    ".git",
+    ".github",
+    ".venv",
+    "staticfiles",
+    "media",
+    "*/migrations/*",
 ]
 
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]
+ignore = [
+    "E501",  # Line length is enforced by the Ruff formatter where safe.
+]
 
-[build-system]
-requires = ["poetry-core>=2.0.0,<3.0.0"]
-build-backend = "poetry.core.masonry.api"
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "auto"
+
+[tool.coverage.run]
+branch = true
+source = ["users", "habits", "telegram_bot"]
+omit = ["*/migrations/*", "*/admin.py", "*/apps.py"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false
+fail_under = 80
