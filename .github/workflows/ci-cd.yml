@@ -124,6 +124,11 @@ jobs:
           sed -i 's#^DATABASE_URL=.*#DATABASE_URL=postgresql://habit_user:ci-docker-password@db:5432/habit_tracker#' .env
           sed -i 's/^TELEGRAM_BOT_TOKEN=.*/TELEGRAM_BOT_TOKEN=test-token/' .env
 
+      - name: Validate required Docker files
+        run: |
+          test -s nginx/default.conf
+          test -s scripts/startup.sh
+
       - name: Validate Docker Compose configuration
         run: docker compose config --quiet
 
