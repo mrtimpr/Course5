@@ -614,6 +614,6 @@ HTTP_PORT=80
 IMAGE_TAG=latest
 ```
 
-Пароль PostgreSQL внутри `DATABASE_URL` должен совпадать с
+### Пароль PostgreSQL внутри `DATABASE_URL` должен совпадать с
 `POSTGRES_PASSWORD`. Если пароль содержит специальные URL-символы, его нужно
 URL-кодировать или выбрать пароль без `@`, `:`, `/`, `#` и `%`.
